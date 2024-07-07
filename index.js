@@ -1,22 +1,28 @@
 require('dotenv').config();
-//const { v4: uuid } = require('uuid')
 const mongoose = require('mongoose')
 const express = require('express');
 const cors = require('cors');
-const dns = require('dns')
+const bodyParser = require('body-parser')
 const app = express();
 
-
-const shortUUID = () => {
-  return uuid().slice(0, 5)
-}
 // Basic Configuration
 const port = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.urlencoded({ extended: true }));
-app.use('/public', express.static(`${process.cwd()}/public`));
+//DB connection
+try {
+  mongoose.connect(process.env.MONGO_URI, {useNewUrlParser:true, useUnifiedTopology:true})
+  console.log(`===== DATABASE CONNECTED =====`)
+} catch (error) {
+  console.error(`Erro in database ${error}`)
+}
 
+//Middlewares
+app.use(cors());
+app.use('/public', express.static(`${process.cwd()}/public`));
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json())
+
+//Endpoints
 app.get('/', function(req, res) {
   res.sendFile(process.cwd() + '/views/index.html');
 });
@@ -26,8 +32,6 @@ app.get('/api/hello', function(req, res) {
   res.json({ greeting: 'hello API' });
 });
 
-mongoose.connect(process.env.MONGO_URI, {useNewUrlParser:true, useUnifiedTopology:true})
-
 
 const urlSchema = new mongoose.Schema({
   fullUrl: String,
@@ -36,42 +40,29 @@ const urlSchema = new mongoose.Schema({
 
 const urlModel = mongoose.model('url', urlSchema)
 
+app.post('/api/shorturl', async (req, res) => {
+  //const fullURL = req.body.url;
+  const urlPattern = /https:\/\/(www.)?|http:\/\/(www.)?/g;
+  const shortURL = Math.floor(1000 + Math.random() * 9000);
 
-app.post('/api/shorturl', (req, res) => {
-  const fullURL = req.body.url
-  const urlPattern = /^(https?:\/\/)?(www\.)?[a-zA-Z\d-]+(\.[a-zA-Z]{2,})(\/[^\s]*)?$/;
-  const shortURL = Math.floor(1000 + Math.random() * 9000)
-  
-  if(!urlPattern.test(fullURL)) return res.status(400).json({ error: 'invalid url' })
-    
-    dns.lookup(fullURL, (err) => {
-    //console.log(fullURL) => ENTRA
-    if(err && err.code != 'ENOTFOUND'){
-      console.log(err)
-    } else {
-      const newInput = urlModel.create({ fullUrl: fullURL, shortUrl: shortURL })
-      .then((data) => {
-        console.log(data)
-        return res.json({original_url: fullURL, short_url: shortURL})
-      })
-      .catch((err) => {
-        res.json(err)
-      })
-    }
-  })
-})
+  if (!urlPattern.test(req.body.url)) {
+    return res.json({error: 'invalid url'});
+  }
+   
+    await urlModel.create({ fullUrl: req.body.url, shortUrl: shortURL });
+        
+    res.json({original_url: req.body.url, short_url: shortURL});
+  });
 
-app.get('/api/shorturl/:url', (req, res) => {
-  const shortURL = req.params.url
-  urlModel.findOne({shortUrl: shortURL})
-  .then((data)=> {
-    res.redirect(data.fullUrl)
-  })
-  .catch(err => {
-    if(err) return res.status(404).json({ error: 'invalid url' })
-  })
-})
 
+app.get('/api/shorturl/:url', async(req, res) => {
+  const shortURL = parseInt(req.params.url, 10);
+
+  const result = await urlModel.findOne({ "shortUrl": shortURL })
+  console.log(`URL FOUND = ${result.fullUrl}`)
+  const fullURL = result.fullUrl
+  res.redirect(fullURL);
+});
 
 app.listen(port, function() {
   console.log(`Listening on port ${port}`);
